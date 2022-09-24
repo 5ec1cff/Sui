@@ -3,6 +3,8 @@
 #include <logging.h>
 #include <cstring>
 #include <sys/system_properties.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 extern "C" {
 [[gnu::constructor]] void constructor() {
@@ -37,6 +39,28 @@ int property_get(const char *key, char *value, const char *default_value) { // N
     }
     if (original) {
         return original(key, value, default_value);
+    }
+    return -1;
+}
+
+using selinux_android_setcon_t = int(const char*);
+
+constexpr char adbd_label[] = "u:r:adbd:s0";
+
+[[gnu::visibility("default")]] [[maybe_unused]]
+int selinux_android_setcon(const char *c) {
+    static selinux_android_setcon_t * original = nullptr;
+    if (!original) {
+        original = (selinux_android_setcon_t *) dlsym(RTLD_NEXT, "selinux_android_setcon");
+    }
+    if (original) {
+        int r = original(c);
+        int fd = open("/proc/self/attr/sockcreate", O_RDWR | O_CLOEXEC);
+        if (fd >= 0) {
+            write(fd, adbd_label, sizeof(adbd_label));
+            close(fd);
+        }
+        return r;
     }
     return -1;
 }
